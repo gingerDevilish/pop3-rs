@@ -1,7 +1,9 @@
 [package]
-name = "pop3-rs"
-version = "0.1.0"
 authors = ["Alena Yuryeva <nimfetrisa@gmail.com>"]
 edition = "2018"
-
+name = "pop3-rs"
+version = "0.1.0"
 [dependencies]
+log = "0.4.6"
+regex = "1.1.6"
+rustls = "0.15.2"
