@@ -101,6 +101,25 @@ impl Pop3Client {
     }
 
     // optional pop3 commands below
+
+    // Show top n lines in message number msg
+    // either OK and top of msg
+    // or Err
+    // transaction state only
+    pub fn top(&self, msg: NonZeroU32, n: u32) -> Pop3Result {
+        unimplemented!()
+    }
+
+    // unique id listing
+    // transaction state only
+    pub fn uidl(&self, msg: Option<NonZeroU32>) -> Pop3Result {
+        unimplemented!()
+    }
+
+    // AUth stage only
+    pub fn apop(&mut self, name: String, digest: String) -> Pop3Result {
+        unimplemented!()
+    }
 }
 
 enum Pop3Command {
