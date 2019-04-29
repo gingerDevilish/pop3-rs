@@ -1,5 +1,7 @@
 use failure::Error;
 use lazy_static::lazy_static;
+use regex::Regex;
+use std::io::{BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::num::NonZeroU32;
 
@@ -16,33 +18,53 @@ enum Pop3ClientState {
 }
 
 pub struct Pop3Client {
-    client: TcpStream,
+    client: BufReader<TcpStream>,
     state: Pop3ClientState,
 }
 
-// needed or not?
-pub enum Pop3Result {
-    Pop3Ok,
-    Pop3Err,
-}
+type Pop3Result = Result<String, String>;
 
 impl Pop3Client {
-    // establish TCP connection
-    // then accept greeting (any positive response)
-    pub fn connect(addr: impl Into<SocketAddr>) -> Self {
-        Self {
-            client: TcpStream::connect(addr).unwrap(),
-            state: Pop3ClientState::Authorization,
-        };
-        unimplemented!()
+    pub fn connect(addr: impl Into<SocketAddr>) -> Option<Self> {
+        TcpStream::connect(addr.into())
+            .map(|client| Self {
+                client: BufReader::new(client),
+                state: Pop3ClientState::Authorization,
+            })
+            .map(|mut client| {
+                if client.read_response().is_ok() {
+                    Some(client)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(None)
     }
 
-    // send with USER, PASS
-    // accept result
-    // if successful, move to Transaction state
-    // if got negative answer -- check if connection is closed & reopen?
     pub fn login(&mut self, login: impl Into<String>, password: impl Into<String>) -> Pop3Result {
-        unimplemented!()
+        let login_query = format!("USER {}\r\n", login.into());
+        let password_query = format!("PASS {}\r\n", password.into());
+
+        let send_user = self
+            .client
+            .get_mut()
+            .write_all(login_query.as_bytes())
+            .map_err(|e| e.to_string());
+
+        let send_pass = send_user.and_then(|_| self.read_response()).and_then(|s1| {
+            let send_pass = self
+                .client
+                .get_mut()
+                .write_all(password_query.as_bytes())
+                .map_err(|e| e.to_string());
+            send_pass.and_then(|_| self.read_response().map(|s2| format!("{}{}", s1, s2)))
+        });
+
+        if send_pass.is_ok() {
+            self.state = Pop3ClientState::Transaction;
+        }
+
+        send_pass
     }
 
     // if sent from Authorization state
@@ -60,7 +82,7 @@ impl Pop3Client {
     // only from Transaction state
     // send STAT
     // accept positive + N-letters + N-octets
-    pub fn stat(&self) -> Pop3Result {
+    pub fn stat(&mut self) -> Pop3Result {
         unimplemented!()
     }
 
@@ -68,7 +90,7 @@ impl Pop3Client {
     // can be OK then listing
     // or ERR if not
     // can be OK then CRLF if no messages
-    pub fn list(&self, msg: Option<NonZeroU32>) -> Pop3Result {
+    pub fn list(&mut self, msg: Option<NonZeroU32>) -> Pop3Result {
         unimplemented!()
     }
 
@@ -76,27 +98,27 @@ impl Pop3Client {
     // OK then multiline
     //or ERR
     // this is message retrieval
-    pub fn retr(&self, msg: NonZeroU32) -> Pop3Result {
+    pub fn retr(&mut self, msg: NonZeroU32) -> Pop3Result {
         unimplemented!()
     }
 
     // mark msg as deleted
     // OK or ERR
     //only TransactionState
-    pub fn dele(&self, msg: NonZeroU32) -> Pop3Result {
+    pub fn dele(&mut self, msg: NonZeroU32) -> Pop3Result {
         unimplemented!()
     }
 
     // transaction state only
     // only positive response
-    pub fn noop(&self) -> Pop3Result {
+    pub fn noop(&mut self) -> Pop3Result {
         unimplemented!()
     }
 
     // Transaction state only
     // undeletes
     // only OK
-    pub fn rset(&self) -> Pop3Result {
+    pub fn rset(&mut self) -> Pop3Result {
         unimplemented!()
     }
 
@@ -106,18 +128,23 @@ impl Pop3Client {
     // either OK and top of msg
     // or Err
     // transaction state only
-    pub fn top(&self, msg: NonZeroU32, n: u32) -> Pop3Result {
+    pub fn top(&mut self, msg: NonZeroU32, n: u32) -> Pop3Result {
         unimplemented!()
     }
 
     // unique id listing
     // transaction state only
-    pub fn uidl(&self, msg: Option<NonZeroU32>) -> Pop3Result {
+    pub fn uidl(&mut self, msg: Option<NonZeroU32>) -> Pop3Result {
         unimplemented!()
     }
 
     // AUth stage only
     pub fn apop(&mut self, name: String, digest: String) -> Pop3Result {
+        unimplemented!()
+    }
+
+    // transmute a response into a result
+    fn read_response(&mut self) -> Pop3Result {
         unimplemented!()
     }
 }
