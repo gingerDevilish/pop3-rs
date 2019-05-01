@@ -11,15 +11,8 @@ lazy_static! {
     static ref ERR_REGEX: Regex = Regex::new(r"-ERR(.*)").unwrap();
 }
 
-enum Pop3ClientState {
-    Authorization,
-    Transaction,
-    Update,
-}
-
 pub struct Pop3Client {
     client: BufReader<TcpStream>,
-    state: Pop3ClientState,
 }
 
 type Pop3Result = Result<String, String>;
@@ -29,7 +22,6 @@ impl Pop3Client {
         TcpStream::connect(addr.into())
             .map(|client| Self {
                 client: BufReader::new(client),
-                state: Pop3ClientState::Authorization,
             })
             .map(|mut client| {
                 if client.read_response().is_ok() {
@@ -45,120 +37,80 @@ impl Pop3Client {
         let login_query = format!("USER {}\r\n", login.into());
         let password_query = format!("PASS {}\r\n", password.into());
 
-        let send_user = self
-            .client
-            .get_mut()
-            .write_all(login_query.as_bytes())
-            .map_err(|e| e.to_string());
-
-        let send_pass = send_user.and_then(|_| self.read_response()).and_then(|s1| {
-            let send_pass = self
-                .client
-                .get_mut()
-                .write_all(password_query.as_bytes())
-                .map_err(|e| e.to_string());
-            send_pass.and_then(|_| self.read_response().map(|s2| format!("{}{}", s1, s2)))
-        });
-
-        if send_pass.is_ok() {
-            self.state = Pop3ClientState::Transaction;
-        }
-
-        send_pass
+        self.send(login_query)
+            .and_then(|s1| self.send(password_query).map(|s2| format!("{}{}", s1, s2)))
     }
 
-    // if sent from Authorization state
-    // just send QUIT & get an ok response
-    // enter the Update state?? (NO)
-    //
-    // if sent from Transaction state
-    // enter the Update state
-    // can be OK
-    // or ERR if failed to remove all
-    pub fn quit(&mut self) {
-        unimplemented!()
+    pub fn quit(mut self) -> Pop3Result {
+        let query = "QUIT\r\n".to_string();
+        self.send(query)
     }
 
-    // only from Transaction state
-    // send STAT
-    // accept positive + N-letters + N-octets
     pub fn stat(&mut self) -> Pop3Result {
-        unimplemented!()
+        let query = "STAT\r\n".to_string();
+        self.send(query)
     }
 
-    // only Transaction state
-    // can be OK then listing
-    // or ERR if not
-    // can be OK then CRLF if no messages
     pub fn list(&mut self, msg: Option<NonZeroU32>) -> Pop3Result {
-        unimplemented!()
+        let query = if let Some(num) = msg {
+            format!("LIST {}\r\n", num)
+        } else {
+            "LIST\r\n".to_string()
+        };
+        self.send(query)
     }
 
-    //only Transaction state
-    // OK then multiline
-    //or ERR
-    // this is message retrieval
     pub fn retr(&mut self, msg: NonZeroU32) -> Pop3Result {
-        unimplemented!()
+        let query = format!("RETR {}\r\n", msg);
+        self.send(query)
     }
 
-    // mark msg as deleted
-    // OK or ERR
-    //only TransactionState
     pub fn dele(&mut self, msg: NonZeroU32) -> Pop3Result {
-        unimplemented!()
+        let query = format!("DELE {}\r\n", msg);
+        self.send(query)
     }
 
-    // transaction state only
-    // only positive response
     pub fn noop(&mut self) -> Pop3Result {
-        unimplemented!()
+        let query = "NOOP\r\n".to_string();
+        self.send(query)
     }
 
-    // Transaction state only
-    // undeletes
-    // only OK
     pub fn rset(&mut self) -> Pop3Result {
-        unimplemented!()
+        let query = "RSET\r\n".to_string();
+        self.send(query)
     }
 
-    // optional pop3 commands below
-
-    // Show top n lines in message number msg
-    // either OK and top of msg
-    // or Err
-    // transaction state only
     pub fn top(&mut self, msg: NonZeroU32, n: u32) -> Pop3Result {
-        unimplemented!()
+        let query = format!("TOP {} {}\r\n", msg, n);
+        self.send(query)
     }
 
-    // unique id listing
-    // transaction state only
     pub fn uidl(&mut self, msg: Option<NonZeroU32>) -> Pop3Result {
-        unimplemented!()
+        let query = if let Some(num) = msg {
+            format!("UIDL {}\r\n", num)
+        } else {
+            "UIDL\r\n".to_string()
+        };
+        self.send(query)
     }
 
-    // AUth stage only
     pub fn apop(&mut self, name: String, digest: String) -> Pop3Result {
-        unimplemented!()
+        let query = format!("APOP {} {}\r\n", name, digest);
+        self.send(query)
     }
 
     // transmute a response into a result
     fn read_response(&mut self) -> Pop3Result {
         unimplemented!()
     }
-}
 
-enum Pop3Command {
-    Greet,
-    User,
-}
-
-//preferable response format
-pub struct Pop3Response {
-    code: u16,
-    msg: String,
-    data: Option<String>,
+    fn send(&mut self, query: String) -> Pop3Result {
+        self.client
+            .get_mut()
+            .write_all(query.as_bytes())
+            .map_err(|e| e.to_string())
+            .and_then(|_| self.read_response())
+    }
 }
 
 #[cfg(test)]
