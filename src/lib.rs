@@ -1,14 +1,23 @@
+use rustls::{ClientConfig, ClientSession};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::num::NonZeroU32;
+use std::sync::Arc;
+use webpki::DNSNameRef;
 
 pub struct Pop3Client {
+    #[cfg(not(feature = "encryption"))]
     client: BufReader<TcpStream>,
+    #[cfg(feature = "encryption")]
+    client: TcpStream,
+    #[cfg(feature = "encryption")]
+    tls: BufReader<ClientSession>,
 }
 
 type Pop3Result = Result<String, String>;
 
 impl Pop3Client {
+    #[cfg(not(feature = "encryption"))]
     pub fn connect(addr: impl Into<SocketAddr>) -> Option<Self> {
         TcpStream::connect(addr.into())
             .map(|client| Self {
@@ -22,6 +31,15 @@ impl Pop3Client {
                 }
             })
             .unwrap_or(None)
+    }
+
+    #[cfg(feature = "encryption")]
+    pub fn connect(
+        addr: impl Into<SocketAddr>,
+        config: Arc<ClientConfig>,
+        hostname: DNSNameRef,
+    ) -> Option<Self> {
+        unimplemented!()
     }
 
     pub fn login(&mut self, login: impl Into<String>, password: impl Into<String>) -> Pop3Result {
@@ -87,14 +105,12 @@ impl Pop3Client {
         self.send(query, msg.is_none())
     }
 
-    // remake to form a digest within the method?
-    // we don't save the greeting now! - no timestamp for digest
     pub fn apop(&mut self, name: String, digest: String) -> Pop3Result {
         let query = format!("APOP {} {}\r\n", name, digest);
         self.send(query, false)
     }
 
-    // transmute a response into a result
+    #[cfg(not(feature = "encryption"))]
     fn read_response(&mut self, multiline: bool) -> Pop3Result {
         let mut response = String::new();
         let mut buffer = String::new();
@@ -112,10 +128,21 @@ impl Pop3Client {
                 if multiline {
                     response.push_str(&s);
                     while !buffer.ends_with(".\r\n") {
-                        // rethink? What SHOULD we do if read is failed?
                         buffer.clear();
-                        if self.client.read_line(&mut buffer).unwrap_or(0) == 0 {
-                            break;
+                        let read = self
+                            .client
+                            .read_line(&mut buffer)
+                            .map_err(|e| e.to_string())
+                            .and_then(|x| {
+                                if x == 0 {
+                                    Err("Connection aborted".to_string())
+                                } else {
+                                    Ok(x)
+                                }
+                            })
+                            .map(|_| String::new());
+                        if read.is_err() {
+                            return read;
                         }
                         response.push_str(&buffer);
                     }
@@ -126,12 +153,18 @@ impl Pop3Client {
             })
     }
 
+    #[cfg(not(feature = "encryption"))]
     fn send(&mut self, query: String, multiline: bool) -> Pop3Result {
         self.client
             .get_mut()
             .write_all(query.as_bytes())
             .map_err(|e| e.to_string())
             .and_then(|_| self.read_response(multiline))
+    }
+
+    #[cfg(feature = "encryption")]
+    fn send(&mut self, query: String, multiline: bool) -> Pop3Result {
+        unimplemented!()
     }
 }
 

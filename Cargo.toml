@@ -12,4 +12,8 @@ version = "0.15.2"
 
 [features]
 default = ["encryption"]
-encryption = ["rustls"]
+encryption = ["rustls", "webpki"]
+
+[dependencies.webpki]
+version = "0.19.1"
+optional = true
