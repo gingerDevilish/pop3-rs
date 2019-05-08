@@ -39,7 +39,19 @@ impl Pop3Client {
         config: Arc<ClientConfig>,
         hostname: DNSNameRef,
     ) -> Option<Self> {
-        unimplemented!()
+        TcpStream::connect(addr.into())
+            .map(|client| Self {
+                client,
+                tls: BufReader::new(ClientSession::new(&config, hostname)),
+            })
+            .map(|mut client| {
+                if client.read_response(false).is_ok() {
+                    Some(client)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(None)
     }
 
     pub fn login(&mut self, login: impl Into<String>, password: impl Into<String>) -> Pop3Result {
