@@ -1,4 +1,4 @@
-use rustls::{ClientConfig, ClientSession};
+use rustls::{ClientConfig, ClientSession, Session};
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::num::NonZeroU32;
@@ -6,12 +6,9 @@ use std::sync::Arc;
 use webpki::DNSNameRef;
 
 pub struct Pop3Client {
-    #[cfg(not(feature = "encryption"))]
     client: BufReader<TcpStream>,
     #[cfg(feature = "encryption")]
-    client: TcpStream,
-    #[cfg(feature = "encryption")]
-    tls: BufReader<ClientSession>,
+    tls: ClientSession,
 }
 
 type Pop3Result = Result<String, String>;
@@ -41,8 +38,8 @@ impl Pop3Client {
     ) -> Option<Self> {
         TcpStream::connect(addr.into())
             .map(|client| Self {
-                client,
-                tls: BufReader::new(ClientSession::new(&config, hostname)),
+                client: BufReader::new(client),
+                tls: ClientSession::new(&config, hostname),
             })
             .map(|mut client| {
                 if client.read_response(false).is_ok() {
@@ -165,6 +162,23 @@ impl Pop3Client {
             })
     }
 
+    #[cfg(feature = "encryption")]
+    fn read_response(&mut self, multiline: bool) -> Pop3Result {
+        let mut response = String::new();
+        let mut buffer = String::new();
+
+        unimplemented!()
+    }
+
+    #[cfg(feature = "encryption")]
+    fn tls_read(&mut self) {
+        // read line from stream
+        // read in into tls
+        // process tls
+        // read from tls
+        unimplemented!()
+    }
+
     #[cfg(not(feature = "encryption"))]
     fn send(&mut self, query: String, multiline: bool) -> Pop3Result {
         self.client
@@ -176,7 +190,15 @@ impl Pop3Client {
 
     #[cfg(feature = "encryption")]
     fn send(&mut self, query: String, multiline: bool) -> Pop3Result {
-        unimplemented!()
+        self.tls
+            .write_all(query.as_bytes())
+            .map_err(|e| e.to_string())
+            .and_then(|_| {
+                self.tls
+                    .write_tls(&mut self.client)
+                    .map_err(|e| e.to_string())
+            })
+            .and_then(|_| self.read_response(multiline))
     }
 }
 
