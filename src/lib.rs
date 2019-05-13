@@ -1,5 +1,7 @@
 use rustls::{ClientConfig, ClientSession, Session};
-use std::io::{BufRead, BufReader, Write};
+#[cfg(not(feature = "encryption"))]
+use std::io::BufRead;
+use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -163,20 +165,33 @@ impl Pop3Client {
     }
 
     #[cfg(feature = "encryption")]
-    fn read_response(&mut self, multiline: bool) -> Pop3Result {
+    fn read_response(&mut self, _multiline: bool) -> Pop3Result {
         let mut response = String::new();
         let mut buffer = String::new();
+        while self.tls.wants_read() {
+            let res = self
+                .tls
+                .read_tls(&mut self.client)
+                .map_err(|e| e.to_string())
+                .and_then(|_| self.tls.process_new_packets().map_err(|e| e.to_string()))
+                .and_then(|_| {
+                    self.tls
+                        .read_to_string(&mut buffer)
+                        .map_err(|e| e.to_string())
+                })
+                .map(|_| response.push_str(&buffer))
+                .map(|_| buffer.clear())
+                .map(|_| String::new());
+            if res.is_err() {
+                return res;
+            }
+        }
 
-        unimplemented!()
-    }
-
-    #[cfg(feature = "encryption")]
-    fn tls_read(&mut self) {
-        // read line from stream
-        // read in into tls
-        // process tls
-        // read from tls
-        unimplemented!()
+        if response.starts_with("+OK") {
+            Ok(response[4..].to_owned())
+        } else {
+            Err(response[5..].to_owned())
+        }
     }
 
     #[cfg(not(feature = "encryption"))]
@@ -195,15 +210,12 @@ impl Pop3Client {
             .map_err(|e| e.to_string())
             .and_then(|_| {
                 self.tls
-                    .write_tls(&mut self.client)
+                    .write_tls(&mut self.client.get_mut())
                     .map_err(|e| e.to_string())
             })
             .and_then(|_| self.read_response(multiline))
     }
 }
-
-// TODO logging?
-// impl for TLS version
 
 #[cfg(test)]
 mod tests {
