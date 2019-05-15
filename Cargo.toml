@@ -17,3 +17,6 @@ encryption = ["rustls", "webpki"]
 [dependencies.webpki]
 version = "0.19.1"
 optional = true
+
+[dev-dependencies]
+webpki-roots = "0.16.0"

@@ -1,3 +1,4 @@
+#[cfg(feature = "encryption")]
 use rustls::{ClientConfig, ClientSession, Session};
 #[cfg(not(feature = "encryption"))]
 use std::io::BufRead;
@@ -5,6 +6,7 @@ use std::io::{BufReader, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::num::NonZeroU32;
 use std::sync::Arc;
+#[cfg(feature = "encryption")]
 use webpki::DNSNameRef;
 
 pub struct Pop3Client {
@@ -23,12 +25,13 @@ impl Pop3Client {
                 client: BufReader::new(client),
             })
             .map(|mut client| {
-                if client.read_response(false).is_ok() {
-                    Some(client)
-                } else {
-                    None
-                }
+                client
+                    .read_response(false)
+                    .map_err(|e| eprintln!("{:?}", e))
+                    .ok()
+                    .map(|_| client)
             })
+            .map_err(|e| eprintln!("{:?}", e))
             .unwrap_or(None)
     }
 
@@ -44,12 +47,13 @@ impl Pop3Client {
                 tls: ClientSession::new(&config, hostname),
             })
             .map(|mut client| {
-                if client.read_response(false).is_ok() {
-                    Some(client)
-                } else {
-                    None
-                }
+                client
+                    .read_response()
+                    .map_err(|e| eprintln!("{:?}", e))
+                    .ok()
+                    .map(|_| client)
             })
+            .map_err(|e| eprintln!("{:?}", e))
             .unwrap_or(None)
     }
 
@@ -165,7 +169,7 @@ impl Pop3Client {
     }
 
     #[cfg(feature = "encryption")]
-    fn read_response(&mut self, _multiline: bool) -> Pop3Result {
+    fn read_response(&mut self) -> Pop3Result {
         let mut response = String::new();
         let mut buffer = String::new();
         while self.tls.wants_read() {
@@ -178,11 +182,19 @@ impl Pop3Client {
                     self.tls
                         .read_to_string(&mut buffer)
                         .map_err(|e| e.to_string())
+                        .and_then(|x| {
+                            if x == 0 {
+                                Err("Connection aborted".to_string())
+                            } else {
+                                Ok(x)
+                            }
+                        })
                 })
                 .map(|_| response.push_str(&buffer))
                 .map(|_| buffer.clear())
                 .map(|_| String::new());
             if res.is_err() {
+                eprintln!("{}", response);
                 return res;
             }
         }
@@ -204,24 +216,67 @@ impl Pop3Client {
     }
 
     #[cfg(feature = "encryption")]
-    fn send(&mut self, query: String, multiline: bool) -> Pop3Result {
+    fn send(&mut self, query: String, _multiline: bool) -> Pop3Result {
         self.tls
             .write_all(query.as_bytes())
             .map_err(|e| e.to_string())
             .and_then(|_| {
-                self.tls
-                    .write_tls(&mut self.client.get_mut())
-                    .map_err(|e| e.to_string())
+                let mut res = Ok(0);
+                while self.tls.wants_write() {
+                    let write = self
+                        .tls
+                        .write_tls(&mut self.client.get_mut())
+                        .map_err(|e| e.to_string());
+                    res = res.and(write);
+                }
+                res
             })
-            .and_then(|_| self.read_response(multiline))
+            .and_then(|_| self.read_response())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::Pop3Client;
+    #[cfg(feature = "encryption")]
+    use rustls::ClientConfig;
+    use std::net::ToSocketAddrs;
+    use std::sync::Arc;
+    #[cfg(feature = "encryption")]
+    use webpki::DNSNameRef;
+    #[cfg(feature = "encryption")]
+    use webpki_roots;
+
+    #[cfg(not(feature = "encryption"))]
+    fn connect() -> Option<Pop3Client> {
+        Pop3Client::connect(
+            "pop3.mailtrap.io:1100"
+                .to_socket_addrs()
+                .expect("Failed to make SocketAddr")
+                .collect::<Vec<_>>()[0],
+        )
+    }
+
+    #[cfg(feature = "encryption")]
+    fn connect() -> Option<Pop3Client> {
+        let mut config = ClientConfig::new();
+        config
+            .root_store
+            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+        let config = Arc::new(config);
+        Pop3Client::connect(
+            "pop3.mailtrap.io:9950"
+                .to_socket_addrs()
+                .expect("Failed to make SocketAddr")
+                .collect::<Vec<_>>()[0],
+            config,
+            DNSNameRef::try_from_ascii_str("pop3.mailtrap.io").expect("Failed to make DNSNameRef"),
+        )
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn connects() {
+        assert!(connect().is_some());
     }
 
     // TODO
