@@ -1,8 +1,16 @@
 [package]
-authors = ["Alena Yuryeva <nimfetrisa@gmail.com>"]
+name    = "pop3-client"
 edition = "2018"
-name = "pop3-rs"
-version = "0.1.0"
+version = "0.0.1"
+authors = [
+    "Anton Dutov <anton.dutov@gmail.com>",
+    "Alena Yuryeva <nimfetrisa@gmail.com>"
+]
+
+[features]
+default     = []
+with-rustls = ["rustls", "webpki", "webpki-roots"]
+
 [dependencies]
 log = "0.4.6"
 
@@ -10,13 +18,10 @@ log = "0.4.6"
 optional = true
 version = "0.15.2"
 
-[features]
-default = ["encryption"]
-encryption = ["rustls", "webpki"]
-
 [dependencies.webpki]
 version = "0.19.1"
 optional = true
 
-[dev-dependencies]
-webpki-roots = "0.16.0"
+[dependencies.webpki-roots]
+version = "0.16.0"
+optional = true

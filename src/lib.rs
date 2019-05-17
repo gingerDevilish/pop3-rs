@@ -1,55 +1,209 @@
-#[cfg(feature = "encryption")]
-use rustls::{ClientConfig, ClientSession, Session};
-use std::cmp::min;
 use std::io::BufRead;
-use std::io::{BufReader, Read, Write};
-use std::net::{SocketAddr, TcpStream};
-use std::num::NonZeroU32;
-use std::sync::Arc;
-#[cfg(feature = "encryption")]
-use webpki::DNSNameRef;
+use std::io::{BufReader, Write};
+use std::net::TcpStream;
 
-pub struct Pop3Client {
+#[cfg(feature = "with-rustls")]
+use {
+    std::sync::Arc,
+    std::io::Read,
+    webpki::DNSNameRef,
+    rustls::{ClientConfig, ClientSession, Session},
+};
+
+pub type Result<T> = std::result::Result<T, String>;
+
+pub struct Builder {
+    #[cfg(feature = "with-rustls")]
+    config: Arc<ClientConfig>,
+}
+
+impl Default for Builder {
+
+    #[cfg(not(feature = "with-rustls"))]
+    fn default() -> Self {
+        Self {}
+    }
+
+    #[cfg(feature = "with-rustls")]
+    fn default() -> Self {
+        let mut config = ClientConfig::new();
+        config
+            .root_store
+            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+
+        let config = Arc::new(config);
+
+        Self {
+            config
+        }
+    }
+}
+
+impl Builder {
+    #[cfg(not(feature = "with-rustls"))]
+    pub fn connect(&mut self, host: &str, port: u16) -> Result<Client> {
+        Client::connect_notls(host, port)
+    }
+
+    #[cfg(feature = "with-rustls")]
+    pub fn connect(&mut self, host: &str, port: u16) -> Result<Client> {
+        Client::connect_rustls(host, port, self.config.clone())
+    }
+
+    #[cfg(feature = "with-rustls")]
+    pub fn rustls_config(&mut self, config: ClientConfig) -> &mut Self {
+        self.config = Arc::new(config);
+        self
+    }
+}
+
+pub struct Client {
     client: BufReader<TcpStream>,
-    #[cfg(feature = "encryption")]
+    #[cfg(feature = "with-rustls")]
     tls: ClientSession,
     authorized: bool,
 }
 
-type Pop3Result = Result<String, String>;
+impl Client {
 
-impl Pop3Client {
-    #[cfg(not(feature = "encryption"))]
-    pub fn connect(addr: impl Into<SocketAddr>) -> Option<Self> {
-        TcpStream::connect(addr.into())
+    pub fn connect(host: &str, port: u16) -> Result<Self> {
+        Builder::default().connect(host, port)
+    }
+
+    pub fn login(&mut self, username: &str, password: &str) -> Result<()> {
+        if self.authorized {
+            return Err("login is only allowed in Authorization stage".to_string());
+        }
+        let username_query = format!("USER {}\r\n", username);
+        let password_query = format!("PASS {}\r\n", password);
+
+        self.send(&username_query, false)
+            .and_then(|s1| {
+                self.send(&password_query, false)
+                    .map(|s2| format!("{}{}", s1, s2))
+                    .map(|s| {
+                        self.authorized = true;
+                        s
+                    })
+            })
+            .map(|_| ())
+    }
+
+    pub fn quit(mut self) -> Result<()> {
+        self.send("QUIT\r\n", false)
+            .map(|_| ())
+    }
+
+    pub fn stat(&mut self) -> Result<(u32, u32)> {
+        match self.send("STAT\r\n", false) {
+            Err(e) => Err(e),
+            Ok(ref s) => {
+                let mut s = s.trim()
+                             .split(' ')
+                             .map(|i| i.parse::<u32>()
+                                       .map_err(|e| e.to_string()));
+                Ok((
+                    s.next().ok_or_else(|| "INVALID_REPLY")??,
+                    s.next().ok_or_else(|| "INVALID_REPLY")??,
+                ))
+            }
+        }
+    }
+
+    pub fn list(&mut self, msg: Option<u32>) -> Result<String> {
+        let query = if let Some(num) = msg {
+            format!("LIST {}\r\n", num)
+        } else {
+            "LIST\r\n".to_string()
+        };
+        self.send(&query, msg.is_none())
+    }
+
+    pub fn retr(&mut self, msg: u32) -> Result<String> {
+        let query = format!("RETR {}\r\n", msg);
+        self.send(&query, true)
+            .map(|s| {
+                s.split('\n')
+                 .skip(1)
+                  .collect::<Vec<&str>>()
+                 .join("\n")
+            })
+    }
+
+    pub fn dele(&mut self, msg: u32) -> Result<String> {
+        let query = format!("DELE {}\r\n", msg);
+        self.send(&query, false)
+    }
+
+    pub fn noop(&mut self) -> Result<()> {
+        self.send("NOOP\r\n", false)
+            .map(|_| ())
+    }
+
+    pub fn rset(&mut self) -> Result<String> {
+        self.send("RSET\r\n", false)
+    }
+
+    pub fn top(&mut self, msg: u32, n: u32) -> Result<String> {
+        let query = format!("TOP {} {}\r\n", msg, n);
+        self.send(&query, true)
+    }
+
+    pub fn uidl(&mut self, msg: Option<u32>) -> Result<String> {
+        let query = if let Some(num) = msg {
+            format!("UIDL {}\r\n", num)
+        } else {
+            "UIDL\r\n".to_string()
+        };
+        self.send(&query, msg.is_none())
+    }
+
+    pub fn apop(&mut self, name: String, digest: String) -> Result<String> {
+        if self.authorized {
+            return Err("login is only allowed in Authorization stage".to_string());
+        }
+        let query = format!("APOP {} {}\r\n", name, digest);
+        self.send(&query, false).map(|s| {
+            self.authorized = true;
+            s
+        })
+    }
+
+    #[cfg(not(feature = "with-rustls"))]
+    fn connect_notls(host: &str, port: u16) -> Result<Self> {
+
+        TcpStream::connect((host, port))
             .map(|client| Self {
                 client: BufReader::new(client),
                 authorized: false,
             })
-            .map(|mut client| {
+            .map_err(|e| format!("{:?}", e))
+            .and_then(|mut client| {
                 client
                     .read_response(false)
-                    .map_err(|e| eprintln!("{:?}", e))
-                    .ok()
                     .map(|_| client)
             })
-            .map_err(|e| eprintln!("{:?}", e))
-            .unwrap_or(None)
+
     }
 
-    #[cfg(feature = "encryption")]
-    pub fn connect(
-        addr: impl Into<SocketAddr>,
-        config: Arc<ClientConfig>,
-        hostname: DNSNameRef,
-    ) -> Option<Self> {
-        TcpStream::connect(addr.into())
+    #[cfg(feature = "with-rustls")]
+    fn connect_rustls(
+        host: &str,
+        port: u16,
+        config: Arc<ClientConfig>
+    ) -> Result<Self> {
+
+        let hostname = DNSNameRef::try_from_ascii_str(host)
+            .map_err(|_| "DNS_NAMEREF_FAILED")?;
+
+        TcpStream::connect((host, port))
             .map(|client| Self {
                 client: BufReader::new(client),
                 tls: ClientSession::new(&config, hostname),
                 authorized: false,
             })
-            .map(|mut client| {
+            .map_err(|e| format!("{:?}", e))
+            .and_then(|mut client| {
                 let mut buf = String::new();
                 client
                     .client
@@ -62,124 +216,34 @@ impl Pop3Client {
                             Err(buf[5..].to_owned())
                         }
                     })
-                    .map_err(|e| eprintln!("Connect: {:?}", e))
-                    .ok()
                     .map(|_| client)
             })
-            .map(|client| {
-                client.map(|mut client| {
-                    client
-                        .client
-                        .get_mut()
-                        .write_all("STLS\r\n".as_bytes())
-                        .map_err(|e| e.to_string())
-                        .and_then(|_| {
-                            let mut buf = String::new();
-                            client
-                                .client
-                                .read_line(&mut buf)
-                                .map_err(|e| e.to_string())
-                                .and_then(|_| {
-                                    if buf.starts_with("+OK") {
-                                        Ok(buf[4..].to_owned())
-                                    } else {
-                                        Err(buf[5..].to_owned())
-                                    }
-                                })
-                        })
-                        .map_err(|e| eprintln!("Starttls: {:?}", e))
-                        .ok()
-                        .map(|_| client)
-                })
+            .and_then(|mut client| {
+                client
+                    .client
+                    .get_mut()
+                    .write_all("STLS\r\n".as_bytes())
+                    .map_err(|e| e.to_string())
+                    .and_then(|_| {
+                        let mut buf = String::new();
+                        client
+                            .client
+                            .read_line(&mut buf)
+                            .map_err(|e| e.to_string())
+                            .and_then(|_| {
+                                if buf.starts_with("+OK") {
+                                    Ok(buf[4..].to_owned())
+                                } else {
+                                    Err(buf[5..].to_owned())
+                                }
+                            })
+                    })
+                    .map(|_| client)
             })
-            .map_err(|e| eprintln!("{:?}", e))
-            .unwrap_or(None)
-            .unwrap_or(None)
     }
 
-    pub fn login(&mut self, login: impl Into<String>, password: impl Into<String>) -> Pop3Result {
-        if self.authorized {
-            return Err("login is only allowed in Authorization stage".to_string());
-        }
-        let login_query = format!("USER {}\r\n", login.into());
-        let password_query = format!("PASS {}\r\n", password.into());
-
-        self.send(login_query, false).and_then(|s1| {
-            self.send(password_query, false)
-                .map(|s2| format!("{}{}", s1, s2))
-                .map(|s| {
-                    self.authorized = true;
-                    s
-                })
-        })
-    }
-
-    pub fn quit(mut self) -> Pop3Result {
-        let query = "QUIT\r\n".to_string();
-        self.send(query, false)
-    }
-
-    pub fn stat(&mut self) -> Pop3Result {
-        let query = "STAT\r\n".to_string();
-        self.send(query, false)
-    }
-
-    pub fn list(&mut self, msg: Option<NonZeroU32>) -> Pop3Result {
-        let query = if let Some(num) = msg {
-            format!("LIST {}\r\n", num)
-        } else {
-            "LIST\r\n".to_string()
-        };
-        self.send(query, msg.is_none())
-    }
-
-    pub fn retr(&mut self, msg: NonZeroU32) -> Pop3Result {
-        let query = format!("RETR {}\r\n", msg);
-        self.send(query, true)
-    }
-
-    pub fn dele(&mut self, msg: NonZeroU32) -> Pop3Result {
-        let query = format!("DELE {}\r\n", msg);
-        self.send(query, false)
-    }
-
-    pub fn noop(&mut self) -> Pop3Result {
-        let query = "NOOP\r\n".to_string();
-        self.send(query, false)
-    }
-
-    pub fn rset(&mut self) -> Pop3Result {
-        let query = "RSET\r\n".to_string();
-        self.send(query, false)
-    }
-
-    pub fn top(&mut self, msg: NonZeroU32, n: u32) -> Pop3Result {
-        let query = format!("TOP {} {}\r\n", msg, n);
-        self.send(query, true)
-    }
-
-    pub fn uidl(&mut self, msg: Option<NonZeroU32>) -> Pop3Result {
-        let query = if let Some(num) = msg {
-            format!("UIDL {}\r\n", num)
-        } else {
-            "UIDL\r\n".to_string()
-        };
-        self.send(query, msg.is_none())
-    }
-
-    pub fn apop(&mut self, name: String, digest: String) -> Pop3Result {
-        if self.authorized {
-            return Err("login is only allowed in Authorization stage".to_string());
-        }
-        let query = format!("APOP {} {}\r\n", name, digest);
-        self.send(query, false).map(|s| {
-            self.authorized = true;
-            s
-        })
-    }
-
-    #[cfg(not(feature = "encryption"))]
-    fn read_response(&mut self, multiline: bool) -> Pop3Result {
+    #[cfg(not(feature = "with-rustls"))]
+    fn read_response(&mut self, multiline: bool) -> Result<String> {
         let mut response = String::new();
         let mut buffer = String::new();
         self.client
@@ -223,8 +287,12 @@ impl Pop3Client {
                         if read.is_err() {
                             return read;
                         }
-                        eprintln!("Buffer content: {}", buffer);
-                        response.push_str(&buffer);
+                        log::trace!("Buffer content: {}", buffer);
+                        response.push_str(&buffer[.. buffer.len() - if buffer.ends_with(".\r\n") {
+                            3
+                        } else {
+                            0
+                        }]);
                     }
                     Ok(response)
                 } else {
@@ -233,8 +301,8 @@ impl Pop3Client {
             })
     }
 
-    #[cfg(feature = "encryption")]
-    fn read_response(&mut self) -> Pop3Result {
+    #[cfg(feature = "with-rustls")]
+    fn read_response(&mut self) -> Result<String> {
         let mut response = String::new();
         let mut buffer = Vec::new();
         while self.tls.wants_read() {
@@ -272,8 +340,8 @@ impl Pop3Client {
         }
     }
 
-    #[cfg(not(feature = "encryption"))]
-    fn send(&mut self, query: String, multiline: bool) -> Pop3Result {
+    #[cfg(not(feature = "with-rustls"))]
+    fn send(&mut self, query: &str, multiline: bool) -> Result<String> {
         self.client
             .get_mut()
             .write_all(query.as_bytes())
@@ -285,8 +353,8 @@ impl Pop3Client {
             })
     }
 
-    #[cfg(feature = "encryption")]
-    fn send(&mut self, query: String, _multiline: bool) -> Pop3Result {
+    #[cfg(feature = "with-rustls")]
+    fn send(&mut self, query: &str, _multiline: bool) -> Result<String> {
         self.tls
             .write_all(query.as_bytes())
             .map_err(|e| e.to_string())
@@ -303,108 +371,4 @@ impl Pop3Client {
             })
             .and_then(|_| self.read_response())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::Pop3Client;
-    #[cfg(feature = "encryption")]
-    use rustls::ClientConfig;
-    use std::net::ToSocketAddrs;
-    use std::sync::Arc;
-    #[cfg(feature = "encryption")]
-    use webpki::DNSNameRef;
-    #[cfg(feature = "encryption")]
-    use webpki_roots;
-
-    #[cfg(not(feature = "encryption"))]
-    fn connect() -> Option<Pop3Client> {
-        Pop3Client::connect(
-            "pop3.mailtrap.io:1100"
-                .to_socket_addrs()
-                .expect("Failed to make SocketAddr")
-                .collect::<Vec<_>>()[0],
-        )
-    }
-
-    #[cfg(feature = "encryption")]
-    fn connect() -> Option<Pop3Client> {
-        let mut config = ClientConfig::new();
-        config
-            .root_store
-            .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
-        let config = Arc::new(config);
-        Pop3Client::connect(
-            "pop3.mailtrap.io:9950"
-                .to_socket_addrs()
-                .expect("Failed to make SocketAddr")
-                .collect::<Vec<_>>()[0],
-            config,
-            DNSNameRef::try_from_ascii_str("pop3.mailtrap.io").expect("Failed to make DNSNameRef"),
-        )
-    }
-
-    #[test]
-    fn connects() {
-        assert!(connect().is_some());
-    }
-
-    #[test]
-    fn login_success() {
-        let mut client = connect().unwrap();
-        let result = client.login("e913202b66b623", "1ddf1a9bd7fc45");
-        eprintln!("login_success: {:?}", result);
-        assert!(result.is_ok())
-    }
-
-    #[test]
-    fn login_wrong_login() {
-        let mut client = connect().unwrap();
-        let result = client.login("e913202b66b62", "1ddf1a9bd7fc45");
-        eprintln!("wrong_login: {:?}", result);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn login_wrong_password() {
-        let mut client = connect().unwrap();
-        let result = client.login("e913202b66b623", "1ddf1a9bd7fc4");
-        eprintln!("wrong_password: {:?}", result);
-        assert!(result.is_err())
-    }
-
-    #[test]
-    fn login_wrong_stage() {
-        let mut client = connect().unwrap();
-        client.login("e913202b66b623", "1ddf1a9bd7fc45").ok();
-        let result = client.login("e913202b66b623", "1ddf1a9bd7fc45");
-        eprintln!("login_wrong_stage: {:?}", result);
-        assert!(result.is_err())
-    }
-
-    // This test will fail if the server implementation does not comply to specification
-    #[cfg(false)]
-    #[test]
-    fn login_already_locked() {
-        connect()
-            .unwrap()
-            .login("e913202b66b623", "1ddf1a9bd7fc45")
-            .ok();
-        let mut client = connect().unwrap();
-        let result = client.login("e913202b66b623", "1ddf1a9bd7fc45");
-        eprintln!("login_already_locked: {:?}", result);
-        assert!(result.is_err())
-    }
-
-    // TODO
-    // test apop (succ, wrong login, wrong digest, wrong stage, already locked)
-    // test quit
-    // test stat (succ, wrong stage)
-    // test list (all list,single ok, single err; wrong stage)
-    // test retr (succ, not found, wrong stage)
-    // test dele (succ, not found, wrong stage)
-    // test noop (succ, wrong stage)
-    // test rset (succ, wrong stage)
-    // test top (succ, not found, wrong stage)
-    // test uidl (all list, single ok, single err, wrong stage)
 }
