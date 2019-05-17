@@ -2,6 +2,8 @@
 name    = "pop3-client"
 edition = "2018"
 version = "0.0.1"
+license = "MIT"
+description = "Another pop3 client"
 authors = [
     "Anton Dutov <anton.dutov@gmail.com>",
     "Alena Yuryeva <nimfetrisa@gmail.com>"
