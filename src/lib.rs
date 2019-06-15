@@ -4,10 +4,10 @@ use std::net::TcpStream;
 
 #[cfg(feature = "with-rustls")]
 use {
+    rustls::StreamOwned,
+    rustls::{ClientConfig, ClientSession},
     std::sync::Arc,
-    std::io::Read,
     webpki::DNSNameRef,
-    rustls::{ClientConfig, ClientSession, Session},
 };
 
 pub type Result<T> = std::result::Result<T, String>;
@@ -18,7 +18,6 @@ pub struct Builder {
 }
 
 impl Default for Builder {
-
     #[cfg(not(feature = "with-rustls"))]
     fn default() -> Self {
         Self {}
@@ -33,9 +32,7 @@ impl Default for Builder {
 
         let config = Arc::new(config);
 
-        Self {
-            config
-        }
+        Self { config }
     }
 }
 
@@ -58,14 +55,14 @@ impl Builder {
 }
 
 pub struct Client {
-    client: BufReader<TcpStream>,
     #[cfg(feature = "with-rustls")]
-    tls: ClientSession,
+    client: BufReader<StreamOwned<ClientSession, TcpStream>>,
+    #[cfg(not(feature = "with-rustls"))]
+    client: BufReader<TcpStream>,
     authorized: bool,
 }
 
 impl Client {
-
     pub fn connect(host: &str, port: u16) -> Result<Self> {
         Builder::default().connect(host, port)
     }
@@ -90,18 +87,17 @@ impl Client {
     }
 
     pub fn quit(mut self) -> Result<()> {
-        self.send("QUIT\r\n", false)
-            .map(|_| ())
+        self.send("QUIT\r\n", false).map(|_| ())
     }
 
     pub fn stat(&mut self) -> Result<(u32, u32)> {
         match self.send("STAT\r\n", false) {
             Err(e) => Err(e),
             Ok(ref s) => {
-                let mut s = s.trim()
-                             .split(' ')
-                             .map(|i| i.parse::<u32>()
-                                       .map_err(|e| e.to_string()));
+                let mut s = s
+                    .trim()
+                    .split(' ')
+                    .map(|i| i.parse::<u32>().map_err(|e| e.to_string()));
                 Ok((
                     s.next().ok_or_else(|| "INVALID_REPLY")??,
                     s.next().ok_or_else(|| "INVALID_REPLY")??,
@@ -122,12 +118,7 @@ impl Client {
     pub fn retr(&mut self, msg: u32) -> Result<String> {
         let query = format!("RETR {}\r\n", msg);
         self.send(&query, true)
-            .map(|s| {
-                s.split('\n')
-                 .skip(1)
-                  .collect::<Vec<&str>>()
-                 .join("\n")
-            })
+            .map(|s| s.split('\n').skip(1).collect::<Vec<&str>>().join("\n"))
     }
 
     pub fn dele(&mut self, msg: u32) -> Result<String> {
@@ -136,8 +127,7 @@ impl Client {
     }
 
     pub fn noop(&mut self) -> Result<()> {
-        self.send("NOOP\r\n", false)
-            .map(|_| ())
+        self.send("NOOP\r\n", false).map(|_| ())
     }
 
     pub fn rset(&mut self) -> Result<String> {
@@ -171,42 +161,26 @@ impl Client {
 
     #[cfg(not(feature = "with-rustls"))]
     fn connect_notls(host: &str, port: u16) -> Result<Self> {
-
         TcpStream::connect((host, port))
             .map(|client| Self {
                 client: BufReader::new(client),
                 authorized: false,
             })
             .map_err(|e| format!("{:?}", e))
-            .and_then(|mut client| {
-                client
-                    .read_response(false)
-                    .map(|_| client)
-            })
-
+            .and_then(|mut client| client.read_response(false).map(|_| client))
     }
 
     #[cfg(feature = "with-rustls")]
-    fn connect_rustls(
-        host: &str,
-        port: u16,
-        config: Arc<ClientConfig>
-    ) -> Result<Self> {
+    fn connect_rustls(host: &str, port: u16, config: Arc<ClientConfig>) -> Result<Self> {
+        let hostname = DNSNameRef::try_from_ascii_str(host).map_err(|_| "DNS_NAMEREF_FAILED")?;
 
-        let hostname = DNSNameRef::try_from_ascii_str(host)
-            .map_err(|_| "DNS_NAMEREF_FAILED")?;
-
-        TcpStream::connect((host, port))
-            .map(|client| Self {
-                client: BufReader::new(client),
-                tls: ClientSession::new(&config, hostname),
-                authorized: false,
-            })
+        let session = ClientSession::new(&config, hostname);
+        let socket = TcpStream::connect((host, port))
+            .map(BufReader::new)
             .map_err(|e| format!("{:?}", e))
             .and_then(|mut client| {
                 let mut buf = String::new();
                 client
-                    .client
                     .read_line(&mut buf)
                     .map_err(|e| e.to_string())
                     .and_then(|_| {
@@ -220,17 +194,16 @@ impl Client {
             })
             .and_then(|mut client| {
                 client
-                    .client
                     .get_mut()
                     .write_all("STLS\r\n".as_bytes())
                     .map_err(|e| e.to_string())
                     .and_then(|_| {
                         let mut buf = String::new();
                         client
-                            .client
                             .read_line(&mut buf)
                             .map_err(|e| e.to_string())
                             .and_then(|_| {
+                                println!("STLS: {}", &buf);
                                 if buf.starts_with("+OK") {
                                     Ok(buf[4..].to_owned())
                                 } else {
@@ -238,11 +211,17 @@ impl Client {
                                 }
                             })
                     })
-                    .map(|_| client)
-            })
+                    .map(|_| client.into_inner())
+            })?;
+
+        let tls_stream = StreamOwned::new(session, socket);
+
+        Ok(Self {
+            client: BufReader::new(tls_stream),
+            authorized: false,
+        })
     }
 
-    #[cfg(not(feature = "with-rustls"))]
     fn read_response(&mut self, multiline: bool) -> Result<String> {
         let mut response = String::new();
         let mut buffer = String::new();
@@ -287,12 +266,9 @@ impl Client {
                         if read.is_err() {
                             return read;
                         }
-                        log::trace!("Buffer content: {}", buffer);
-                        response.push_str(&buffer[.. buffer.len() - if buffer.ends_with(".\r\n") {
-                            3
-                        } else {
-                            0
-                        }]);
+                        response.push_str(
+                            &buffer[..buffer.len() - if buffer.ends_with(".\r\n") { 3 } else { 0 }],
+                        );
                     }
                     Ok(response)
                 } else {
@@ -301,74 +277,11 @@ impl Client {
             })
     }
 
-    #[cfg(feature = "with-rustls")]
-    fn read_response(&mut self) -> Result<String> {
-        let mut response = String::new();
-        let mut buffer = Vec::new();
-        while self.tls.wants_read() {
-            let res = self
-                .tls
-                .read_tls(&mut self.client)
-                .map_err(|e| e.to_string())
-                .and_then(|_| self.tls.process_new_packets().map_err(|e| e.to_string()))
-                .and_then(|_| {
-                    self.tls
-                        .read_to_end(&mut buffer)
-                        .map_err(|e| e.to_string())
-                        .and_then(|x| {
-                            if x == 0 {
-                                Err("Connection aborted".to_string())
-                            } else {
-                                Ok(x)
-                            }
-                        })
-                        .and_then(|_| String::from_utf8(buffer.clone()).map_err(|e| e.to_string()))
-                })
-                .map(|s| response.push_str(&s))
-                .map(|_| buffer.clear())
-                .map(|_| String::new());
-            if res.is_err() {
-                eprintln!("Err reading TLS: {}", response);
-                return res;
-            }
-        }
-
-        if response.starts_with("+OK") {
-            Ok(response[4..].to_owned())
-        } else {
-            Err(response[5..].to_owned())
-        }
-    }
-
-    #[cfg(not(feature = "with-rustls"))]
     fn send(&mut self, query: &str, multiline: bool) -> Result<String> {
         self.client
             .get_mut()
             .write_all(query.as_bytes())
             .map_err(|e| e.to_string())
             .and_then(|_| self.read_response(multiline))
-            .map_err(|e| {
-                eprintln!("Error: {}", e);
-                e
-            })
-    }
-
-    #[cfg(feature = "with-rustls")]
-    fn send(&mut self, query: &str, _multiline: bool) -> Result<String> {
-        self.tls
-            .write_all(query.as_bytes())
-            .map_err(|e| e.to_string())
-            .and_then(|_| {
-                let mut res = Ok(0);
-                while self.tls.wants_write() {
-                    let write = self
-                        .tls
-                        .write_tls(&mut self.client.get_mut())
-                        .map_err(|e| e.to_string());
-                    res = res.and(write);
-                }
-                res
-            })
-            .and_then(|_| self.read_response())
     }
 }
