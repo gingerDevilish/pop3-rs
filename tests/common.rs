@@ -2,12 +2,12 @@
 mod tests {
     use pop3_client::{Client, Result};
 
-    #[cfg(not(feature = "with-rustls"))]
+    #[cfg(not(feature = "rustls"))]
     fn connect() -> Result<Client> {
         Client::connect("pop3.mailtrap.io", 1100)
     }
 
-    #[cfg(feature = "with-rustls")]
+    #[cfg(feature = "rustls")]
     fn connect() -> Result<Client> {
         pop3_client::Builder::default().connect("pop3.mailtrap.io", 1100)
     }

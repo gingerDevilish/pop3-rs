@@ -2,7 +2,7 @@ use std::io::BufRead;
 use std::io::{BufReader, Write};
 use std::net::TcpStream;
 
-#[cfg(feature = "with-rustls")]
+#[cfg(feature = "rustls")]
 use {
     rustls::StreamOwned,
     rustls::{ClientConfig, ClientSession},
@@ -13,17 +13,17 @@ use {
 pub type Result<T> = std::result::Result<T, String>;
 
 pub struct Builder {
-    #[cfg(feature = "with-rustls")]
+    #[cfg(feature = "rustls")]
     config: Arc<ClientConfig>,
 }
 
 impl Default for Builder {
-    #[cfg(not(feature = "with-rustls"))]
+    #[cfg(not(feature = "rustls"))]
     fn default() -> Self {
         Self {}
     }
 
-    #[cfg(feature = "with-rustls")]
+    #[cfg(feature = "rustls")]
     fn default() -> Self {
         let mut config = ClientConfig::new();
         config
@@ -37,12 +37,12 @@ impl Default for Builder {
 }
 
 impl Builder {
-    #[cfg(not(feature = "with-rustls"))]
+    #[cfg(not(feature = "rustls"))]
     pub fn connect(&mut self, host: &str, port: u16) -> Result<Client> {
         Client::connect_notls(host, port)
     }
 
-    #[cfg(feature = "with-rustls")]
+    #[cfg(feature = "rustls")]
     pub fn connect(&mut self, host: &str, port: u16) -> Result<Client> {
         Client::connect_rustls(host, port, self.config.clone())
     }
@@ -55,9 +55,9 @@ impl Builder {
 }
 
 pub struct Client {
-    #[cfg(feature = "with-rustls")]
+    #[cfg(feature = "rustls")]
     client: BufReader<StreamOwned<ClientSession, TcpStream>>,
-    #[cfg(not(feature = "with-rustls"))]
+    #[cfg(not(feature = "rustls"))]
     client: BufReader<TcpStream>,
     authorized: bool,
 }
