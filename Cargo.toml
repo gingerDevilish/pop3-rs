@@ -21,4 +21,4 @@ version = "0.16.0"
 
 [features]
 default = []
-rustls = ["rustls", "webpki", "webpki-roots"]
+with-rustls = ["rustls", "webpki", "webpki-roots"]
