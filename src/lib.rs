@@ -13,9 +13,12 @@ use {
 pub type Result<T> = std::result::Result<T, String>;
 
 
-/// A builder to create a Client with a connection.
+/// A builder to create a [`Client`] with a connection.
 ///
-/// As it is possible to create the Client without using Builder, we recommend to only use in when you with to define a custom ClientConfig for the TLS connection.
+/// As it is possible to create the [`Client`] without using `Builder`, we recommend to only use in when you with to define a custom [`ClientConfig`] for the TLS connection.
+///
+/// [`Client`]: struct.Client
+/// [`ClientConfig`]: https://docs.rs/rustls/0.15.2/rustls/struct.ClientConfig.html
 pub struct Builder {
     #[cfg(feature = "with-rustls")]
     config: Arc<ClientConfig>,
@@ -57,7 +60,9 @@ impl Builder {
     /// # }
     /// ```
     /// # Errors
-    /// The errors are defined by Client::connect() method.
+    /// The errors are defined by [`Client::connect()`] method.
+    ///
+    /// [`Client::connect()`]: struct.Client.html#method.connect
     #[cfg(not(feature = "with-rustls"))]
     pub fn connect(&mut self, host: &str, port: u16) -> Result<Client> {
         Client::connect_notls(host, port)
@@ -67,7 +72,9 @@ impl Builder {
     ///
     /// The usage is pretty much the same as in the no-tls option of connect().
     /// # Errors
-    /// The errors are defined by Client::connect() method.
+    /// The errors are defined by [`Client::connect()`] method.
+    ///
+    /// [`Client::connect()`]: struct.Client.html#method.connect
     #[cfg(feature = "with-rustls")]
     pub fn connect(&mut self, host: &str, port: u16) -> Result<Client> {
         Client::connect_rustls(host, port, self.config.clone())
@@ -97,19 +104,21 @@ impl Builder {
     }
 }
 
-/// The key structure for the crate, delineating capabilities of the POP3 client as per the protocol RFC
+/// The key structure for the crate, delineating capabilities of the POP3 client as per the protocol [RFC]
 ///
 /// # Errors and problems
-/// **All** the methods this Client has are susceptible to errors. The common reasons for those are:
+/// **All** the methods this `Client` has are susceptible to errors. The common reasons for those are:
 /// - Not possible to establish connection
 /// - The server does not support the protocol
 /// - Connection aborted
 /// - Some data got lost or modified, and now it's not possible to decode the obtained message
-/// - The server does not recognize the command. This might happen even if by RFC, the command is mandatory, as most of the servers do not follow the protocol letter by letter
+/// - The server does not recognize the command. This might happen even if by [RFC], the command is mandatory, as most of the servers do not follow the protocol letter by letter
 /// - The command was sent on the wrong stage. In other words, you tried to do something before you authorized.
 /// - The server returned an error response. We'll look at those within each separate method
 ///
 /// To find out more, read the output of the error you've got -- it's always a string!
+///
+/// [RFC]: https://tools.ietf.org/html/rfc1081
 pub struct Client {
     #[cfg(feature = "with-rustls")]
     client: BufReader<StreamOwned<ClientSession, TcpStream>>,
@@ -121,7 +130,7 @@ pub struct Client {
 impl Client {
     /// Connect to given host and port.
     ///
-    /// This is the simplest way to initiate connection, so it's preferable to use it in a straightforward manner unless you have specific ClientConfiguration reservations.
+    /// This is the simplest way to initiate connection, so it's preferable to use it in a straightforward manner unless you have specific [`ClientConfig`] reservations.
     ///
     /// # Example
     ///
@@ -135,6 +144,8 @@ impl Client {
     /// #    Ok(())
     /// # }
     /// ```
+    ///
+    /// [`ClientConfig`]: https://docs.rs/rustls/0.15.2/rustls/struct.ClientConfig.html
     pub fn connect(host: &str, port: u16) -> Result<Self> {
         Builder::default().connect(host, port)
     }
@@ -196,7 +207,7 @@ impl Client {
         self.send("QUIT\r\n", false).map(|_| ())
     }
 
-    /// Display the statistics for the mailbox (That's what the STAT command does).
+    /// Display the statistics for the mailbox (that's what the `STAT` command does).
     ///
     /// In the resulting u32 tuple, the first number is the number of messages, and the second one is number of octets in those messages.
     ///
@@ -230,7 +241,7 @@ impl Client {
         }
     }
 
-    /// Show the statistical information on a chosen letter, or all letters. The information in question always required to start with the letter size, but use of additional stats is not reglamanted in any way.
+    /// Show the statistical information on a chosen letter, or all letters. The information in question always required to start with the letter size, but use of additional stats is not regimented in any way.
     ///
     ///
     /// # Example
@@ -298,7 +309,7 @@ impl Client {
     /// # use crate::Client;
     /// # fn main() -> Result<(), String> {
     /// # let client = Client::connect("my.host.com", 110)?;
-    /// client.dele(3)?; // now, the THIRD message is marked as deleted, and no new manipulations of it are possible
+    /// client.dele(3)?; // now, the THIRD message is marked as deleted, and no new manipulations on it are possible
     ///
     /// #    Ok(())
     /// # }
@@ -412,7 +423,7 @@ impl Client {
 
     /// Authorise using the APOP method
     ///
-    /// Refer to the POP3 RFC for details.
+    /// Refer to the POP3 [RFC] for details.
     ///
     /// # Example
     ///
@@ -429,6 +440,8 @@ impl Client {
     /// ```
     /// # Errors
     /// The server will return error if permission was denied.
+    ///
+    /// [RFC]: https://tools.ietf.org/html/rfc1081
     pub fn apop(&mut self, name: String, digest: String) -> Result<String> {
         if self.authorized {
             return Err("login is only allowed in Authorization stage".to_string());
