@@ -4,20 +4,20 @@ description = "Another pop3 client"
 edition = "2018"
 license = "MIT"
 name = "pop3-client"
-version = "0.0.1"
+version = "0.0.2"
 
 
 [dependencies.rustls]
 optional = true
-version = "0.15.2"
+version = "0.15"
 
 [dependencies.webpki]
 optional = true
-version = "0.19.1"
+version = "0.19"
 
 [dependencies.webpki-roots]
 optional = true
-version = "0.16.0"
+version = "0.16"
 
 [features]
 default = []
