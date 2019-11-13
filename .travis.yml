@@ -1,0 +1,13 @@
+language: rust
+rust:
+- stable
+
+sudo: false
+
+cache: cargo
+
+script:
+- cargo build --verbose
+- cargo build --verbose --featuers with-rusttls
+- cargo test --verbose
+- cargo test --verbose --featuers with-rusttls
