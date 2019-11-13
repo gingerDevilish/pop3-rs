@@ -8,6 +8,6 @@ cache: cargo
 
 script:
 - cargo build --verbose
-- cargo build --verbose --featuers with-rusttls
+- cargo build --verbose --features with-rustls
 - cargo test --verbose
-- cargo test --verbose --featuers with-rusttls
+- cargo test --verbose --features with-rustls
