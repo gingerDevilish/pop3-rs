@@ -51,7 +51,7 @@ impl Builder {
     ///
     /// ```no_run
     /// # use std::result::Result;
-    /// # use crate::Builder;
+    /// # use pop3_client::Builder;
     /// #
     /// # fn main() -> Result<(), String> {
     ///      let client = Builder::default().connect("my.host.com", 110)?;
@@ -136,7 +136,7 @@ impl Client {
     ///
     /// ```no_run
     /// # use std::result::Result;
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// #
     /// # fn main() -> Result<(), String> {
     ///let client = Client::connect("my.host.com", 110)?;
@@ -156,10 +156,10 @@ impl Client {
     ///
     /// ```no_run
     /// # use std::result::Result;
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// #
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// client.login("sweet_username", "very_secret_password")?;
     /// #    Ok(())
     /// # }
@@ -195,9 +195,9 @@ impl Client {
     /// ```compile_fail
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     ///client.quit()?;
     ///client.noop()?; // Shouldn't compile, as the client has been consumed upon quitting
     /// #    Ok(())
@@ -216,9 +216,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// let (messages, octets) = client.stat()?;
     /// assert_eq!(messages, 2);
     /// assert_eq!(octets, 340);
@@ -249,9 +249,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// let single_stats = client.list(Some(1))?; // show info on the letter number 1
     /// let all_stats = client.list(None)?; // show info on all letters
     ///
@@ -279,9 +279,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// let letter_content = client.retr(5)?;
     ///
     /// #    Ok(())
@@ -306,9 +306,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// client.dele(3)?; // now, the THIRD message is marked as deleted, and no new manipulations on it are possible
     ///
     /// #    Ok(())
@@ -331,9 +331,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// assert!(client.noop().is_ok());
     ///
     /// #    Ok(())
@@ -351,9 +351,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// client.dele(3)?;
     /// client.dele(4)?;
     /// client.rset()?; // undo all the previous deletions
@@ -372,9 +372,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// let top = client.top(1, 2)?; // Get TWO first lines of the FIRST message
     ///
     /// #    Ok(())
@@ -398,9 +398,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// let uidl_all = client.uidl(None)?;
     /// let uidl_one = client.uidl(Some(1));
     ///
@@ -430,9 +430,9 @@ impl Client {
     /// ```no_run
     /// # use std::result::Result;
     /// #
-    /// # use crate::Client;
+    /// # use pop3_client::Client;
     /// # fn main() -> Result<(), String> {
-    /// # let client = Client::connect("my.host.com", 110)?;
+    /// # let mut client = Client::connect("my.host.com", 110)?;
     /// client.apop("another_sweet_username", "c4c9334bac560ecc979e58001b3e22fb")?;
     ///
     /// #    Ok(())
@@ -442,7 +442,7 @@ impl Client {
     /// The server will return error if permission was denied.
     ///
     /// [RFC]: https://tools.ietf.org/html/rfc1081
-    pub fn apop(&mut self, name: String, digest: String) -> Result<String> {
+    pub fn apop(&mut self, name: &str, digest: &str) -> Result<String> {
         if self.authorized {
             return Err("login is only allowed in Authorization stage".to_string());
         }
