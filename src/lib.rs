@@ -85,15 +85,17 @@ impl Builder {
     /// # Example
     /// ```no_run
     /// # use std::result::Result;
-    /// # use crate::Builder;
+    /// # use pop3_client::Builder;
     ///   use rustls::ClientConfig;
     /// #
     /// # fn main() -> Result<(), String> {
     ///
-    /// let config = ClientConfig::new().root_store
+    /// let mut config = ClientConfig::new();
+    /// config
+    ///     .root_store
     ///     .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
     ///
-    /// let client = Builder::default().rustls_config(config).connect()?;
+    /// let client = Builder::default().rustls_config(config).connect("my.host.com", 995)?;
     /// #    Ok(())
     /// # }
     /// ```

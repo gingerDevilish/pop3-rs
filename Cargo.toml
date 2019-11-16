@@ -1,10 +1,17 @@
 [package]
-authors = ["Anton Dutov <anton.dutov@gmail.com>", "Alena Yuryeva <nimfetrisa@gmail.com>"]
+authors     = [
+    "Anton Dutov <anton.dutov@gmail.com>",
+    "Alena Yuryeva <nimfetrisa@gmail.com>"
+]
+edition     = "2018"
+license     = "MIT"
+readme      = "README.md"
+name        = "pop3-client"
+version     = "0.0.3"
+repository  = "https://github.com/anton-dutov/pop3-client-rs"
 description = "Another pop3 client"
-edition = "2018"
-license = "MIT"
-name = "pop3-client"
-version = "0.0.2"
+categories  = ["email"]
+keywords    = ["mail", "pop3"]
 
 
 [dependencies.rustls]
