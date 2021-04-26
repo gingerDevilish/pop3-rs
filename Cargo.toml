@@ -7,25 +7,24 @@ edition     = "2018"
 license     = "MIT"
 readme      = "README.md"
 name        = "pop3-client"
-version     = "0.0.3"
+version     = "0.1.0"
 repository  = "https://github.com/anton-dutov/pop3-client-rs"
 description = "Another pop3 client"
 categories  = ["email"]
 keywords    = ["mail", "pop3"]
 
 
-[dependencies.rustls]
-optional = true
-version = "0.15"
-
-[dependencies.webpki]
-optional = true
-version = "0.19"
-
-[dependencies.webpki-roots]
-optional = true
-version = "0.16"
 
 [features]
 default = []
-with-rustls = ["rustls", "webpki", "webpki-roots"]
+with-encoding = ["encoding_rs"]
+with-rustls   = ["rustls", "webpki", "webpki-roots"]
+
+
+[dependencies]
+bytes        = "1"
+encoding_rs  = {version = "0.8", optional = true }
+rustls       = {version = "0.19", optional = true }
+webpki       = {version = "0.21", optional = true }
+webpki-roots = {version = "0.21", optional = true }
+

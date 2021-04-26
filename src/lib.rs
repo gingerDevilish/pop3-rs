@@ -2,6 +2,8 @@ use std::io::BufRead;
 use std::io::{BufReader, Write};
 use std::net::TcpStream;
 
+use bytes::{Bytes, BytesMut, BufMut};
+
 #[cfg(feature = "with-rustls")]
 use {
     rustls::StreamOwned,
@@ -178,9 +180,9 @@ impl Client {
         let username_query = format!("USER {}\r\n", username);
         let password_query = format!("PASS {}\r\n", password);
 
-        self.send(&username_query, false)
+        self.query_string(&username_query, false)
             .and_then(|s1| {
-                self.send(&password_query, false)
+                self.query_string(&password_query, false)
                     .map(|s2| format!("{}{}", s1, s2))
                     .map(|s| {
                         self.authorized = true;
@@ -206,7 +208,7 @@ impl Client {
     /// # }
     /// ```
     pub fn quit(mut self) -> Result<()> {
-        self.send("QUIT\r\n", false).map(|_| ())
+        self.query_string("QUIT\r\n", false).map(|_| ())
     }
 
     /// Display the statistics for the mailbox (that's what the `STAT` command does).
@@ -228,7 +230,7 @@ impl Client {
     /// # }
     /// ```
     pub fn stat(&mut self) -> Result<(u32, u32)> {
-        match self.send("STAT\r\n", false) {
+        match self.query_string("STAT\r\n", false) {
             Err(e) => Err(e),
             Ok(ref s) => {
                 let mut s = s
@@ -236,8 +238,8 @@ impl Client {
                     .split(' ')
                     .map(|i| i.parse::<u32>().map_err(|e| e.to_string()));
                 Ok((
-                    s.next().ok_or_else(|| "INVALID_REPLY")??,
-                    s.next().ok_or_else(|| "INVALID_REPLY")??,
+                    s.next().ok_or("INVALID_REPLY")??,
+                    s.next().ok_or("INVALID_REPLY")??,
                 ))
             }
         }
@@ -270,7 +272,7 @@ impl Client {
         } else {
             "LIST\r\n".to_string()
         };
-        self.send(&query, msg.is_none())
+        self.query_string(&query, msg.is_none())
     }
 
     /// Show the full content of the chosen message
@@ -295,8 +297,59 @@ impl Client {
     /// - The letter under the given index has been marked deleted
     pub fn retr(&mut self, msg: u32) -> Result<String> {
         let query = format!("RETR {}\r\n", msg);
-        self.send(&query, true)
-            .map(|s| s.split('\n').skip(1).collect::<Vec<&str>>().join("\n"))
+
+        #[cfg(feature = "with-encoding")]
+        {
+            let reply = self.query(&query, true)?;
+
+            let mut head = true;
+            let mut data = BytesMut::with_capacity(reply.len());
+
+            let mut charset: Option<String> = None;
+
+            for line in reply.split(|c| *c == b'\n').skip(1) {
+
+                data.put(&line[..]);
+                data.put_u8(b'\n');
+
+                if line == b"\r" {
+                    head = false;
+                }
+
+                if head && line.starts_with(b"Content-Type:") {
+                    let mut tmp = line.split(|c| *c == b'=');
+                    let prefix  = tmp.next().ok_or("Invalid charset")?;
+
+                    if prefix.ends_with(b"charset") {
+                        let cset = tmp.next().ok_or("Invalid charset")?;
+                        charset = Some(
+                            std::str::from_utf8(&cset[..cset.len()-1])
+                                .map_err(|_| String::from("INVALID_ENCODING"))?
+                                .to_lowercase()
+                        );
+                    }
+                }
+            }
+
+            Ok(if let Some(charset) = charset {
+                let encoding = encoding_rs::Encoding::for_label(charset.as_bytes())
+                    .ok_or_else(|| String::from("ENCODING_NOT_FOUND"))?;
+
+                let (data, _, _) = encoding.decode(&data);
+
+                data.to_string()
+            } else {
+                std::str::from_utf8(&data[..])
+                    .map_err(|_| String::from("INVALID_ENCODING"))?
+                    .to_string()
+            })
+        }
+
+        #[cfg(not(feature = "with-encoding"))]
+        {
+            self.query_string(&query, true)
+                .map(|s| s.split('\n').skip(1).collect::<Vec<&str>>().join("\n"))
+        }
     }
 
 
@@ -322,7 +375,7 @@ impl Client {
     /// - The letter under the given index has been marked deleted
     pub fn dele(&mut self, msg: u32) -> Result<String> {
         let query = format!("DELE {}\r\n", msg);
-        self.send(&query, false)
+        self.query_string(&query, false)
     }
 
 
@@ -342,7 +395,7 @@ impl Client {
     /// # }
     /// ```
     pub fn noop(&mut self) -> Result<()> {
-        self.send("NOOP\r\n", false).map(|_| ())
+        self.query("NOOP\r\n", false).map(|_| ())
     }
 
     /// Reset the session state, unmarking the items marked as deleted
@@ -363,7 +416,7 @@ impl Client {
     /// # }
     /// ```
     pub fn rset(&mut self) -> Result<String> {
-        self.send("RSET\r\n", false)
+        self.query_string("RSET\r\n", false)
     }
 
     /// Show top n lines of a chosen message
@@ -387,9 +440,9 @@ impl Client {
     /// The server may return an error response if:
     /// - The letter under the given index does not exist in the mailbox
     /// - The letter under the given index has been marked deleted
-    pub fn top(&mut self, msg: u32, n: u32) -> Result<String> {
+    pub fn top(&mut self, msg: u32, n: u32) -> Result<Bytes> {
         let query = format!("TOP {} {}\r\n", msg, n);
-        self.send(&query, true)
+        self.query(&query, true)
     }
 
     /// Show the unique ID listing for the chosen message or for all the messages. Unlike message numbering, this ID does not change between sessions.
@@ -420,7 +473,7 @@ impl Client {
         } else {
             "UIDL\r\n".to_string()
         };
-        self.send(&query, msg.is_none())
+        self.query_string(&query, msg.is_none())
     }
 
     /// Authorise using the APOP method
@@ -449,7 +502,7 @@ impl Client {
             return Err("login is only allowed in Authorization stage".to_string());
         }
         let query = format!("APOP {} {}\r\n", name, digest);
-        self.send(&query, false).map(|s| {
+        self.query_string(&query, false).map(|s| {
             self.authorized = true;
             s
         })
@@ -518,11 +571,11 @@ impl Client {
         })
     }
 
-    fn read_response(&mut self, multiline: bool) -> Result<String> {
-        let mut response = String::new();
-        let mut buffer = String::new();
+    fn read_response(&mut self, multiline: bool) -> Result<Bytes> {
+        let mut response = BytesMut::new();
+        let mut buffer   = vec![];
         self.client
-            .read_line(&mut buffer)
+            .read_until(b'\n', &mut buffer)
             .map_err(|e| e.to_string())
             .and_then(|x| {
                 if x == 0 {
@@ -532,24 +585,28 @@ impl Client {
                 }
             })
             .and_then(|_| {
-                if buffer.starts_with("+OK") {
-                    Ok(buffer[4..].to_owned())
+                if buffer.starts_with(b"+OK") {
+                    Ok(Bytes::copy_from_slice(&buffer[4..]))
                 } else {
-                    Err(if buffer.len() < 6 {
-                        buffer.clone()
-                    } else {
-                        buffer[5..].to_owned()
-                    })
+                    Err(std::str::from_utf8(
+                        if buffer.len() < 6 {
+                            &buffer
+                        } else {
+                            &buffer[5..]
+                        })
+                        .unwrap_or_else(|_| "Error is not valid utf-8")
+                        .to_string()
+                    )
                 }
             })
             .and_then(|s| {
                 if multiline {
-                    response.push_str(&s);
-                    while !buffer.ends_with(".\r\n") {
+                    response.put(&s[..]);
+                    while !buffer.ends_with(b".\r\n") {
                         buffer.clear();
                         let read = self
                             .client
-                            .read_line(&mut buffer)
+                            .read_until(b'\n', &mut buffer)
                             .map_err(|e| e.to_string())
                             .and_then(|x| {
                                 if x == 0 {
@@ -558,26 +615,34 @@ impl Client {
                                     Ok(x)
                                 }
                             })
-                            .map(|_| String::new());
+                            .map(|_| Bytes::new());
                         if read.is_err() {
                             return read;
                         }
-                        response.push_str(
-                            &buffer[..buffer.len() - if buffer.ends_with(".\r\n") { 3 } else { 0 }],
+                        response.put(
+                            &buffer[..buffer.len() - if buffer.ends_with(b".\r\n") { 3 } else { 0 }],
                         );
                     }
-                    Ok(response)
+                    Ok(response.freeze())
                 } else {
                     Ok(s)
                 }
             })
     }
 
-    fn send(&mut self, query: &str, multiline: bool) -> Result<String> {
+    fn query(&mut self, query: &str, multiline: bool) -> Result<Bytes> {
         self.client
             .get_mut()
             .write_all(query.as_bytes())
             .map_err(|e| e.to_string())
             .and_then(|_| self.read_response(multiline))
+    }
+
+    fn query_string(&mut self, query: &str, multiline: bool) -> Result<String> {
+        let reply = self.query(query, multiline)?;
+
+        std::str::from_utf8(&reply[..])
+            .map(|s| s.to_string())
+            .map_err(|_| String::from("Error is not valid utf-8"))
     }
 }
